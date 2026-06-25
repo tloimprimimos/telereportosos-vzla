@@ -15,7 +15,9 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 
   <style>
@@ -1036,6 +1038,59 @@
       );
     }
 
+    // ─── MAPA ACOPIO ───────────────────────────────────────────────────────────
+    function MapaAcopio({ centers }) {
+      const containerRef = useRef(null);
+      const mapRef       = useRef(null);
+
+      useEffect(() => {
+        if (!containerRef.current || mapRef.current) return;
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+          iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+          shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        });
+        const map = L.map(containerRef.current, { zoomControl: true }).setView([10.491, -66.902], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        }).addTo(map);
+        mapRef.current = map;
+        return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+      }, []);
+
+      useEffect(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.eachLayer(l => { if (l instanceof L.Marker) map.removeLayer(l); });
+
+        centers.filter(c => c.lat && c.lng).forEach(c => {
+          const needs = c.needs.split(',').map(s => s.trim()).slice(0, 5).join('<br>• ');
+          L.marker([c.lat, c.lng]).addTo(map).bindPopup(
+            `<div style="min-width:210px;font-family:system-ui">
+              <b style="font-size:13px">${c.name}</b><br>
+              <span style="color:#6b7280;font-size:11px">📍 ${c.address}</span>
+              <hr style="margin:5px 0;border-color:#e5e7eb">
+              <span style="color:#92400e;font-size:11px;font-weight:700">🙏 Se necesita:</span><br>
+              <span style="font-size:11px;color:#78350f">• ${needs}</span>
+              ${c.contact ? `<hr style="margin:5px 0;border-color:#e5e7eb"><a href="tel:${c.contact}" style="color:#2563eb;font-size:11px">📞 ${c.contact}</a>` : ''}
+            </div>`
+          );
+        });
+      }, [centers]);
+
+      const withCoords = centers.filter(c => c.lat && c.lng).length;
+
+      return (
+        <div>
+          <div ref={containerRef} style={{height:420, borderRadius:'1rem', overflow:'hidden', zIndex:0, border:'1px solid #e5e7eb'}} />
+          <p className="text-xs text-gray-400 mt-2 text-center">
+            {withCoords} centro{withCoords !== 1 ? 's' : ''} en el mapa · Toca un marcador para ver detalles
+          </p>
+        </div>
+      );
+    }
+
     // ─── ACOPIO CARD ───────────────────────────────────────────────────────────
     function AcopioCard({ center, onClose }) {
       const items = center.needs.split(',').map(s => s.trim()).filter(Boolean);
@@ -1108,6 +1163,7 @@
       const [loading, setLoading] = useState(true);
       const [showForm, setShowForm] = useState(false);
       const [saving, setSaving]   = useState(false);
+      const [tab, setTab]         = useState('lista');
       const [form, setForm]       = useState({ name:'', address:'', zone:'', needs:'', contactName:'', contact:'' });
       const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -1122,6 +1178,16 @@
         return unsub;
       }, []);
 
+      const geocode = async (address, zone) => {
+        try {
+          const q = `${address}, ${zone}, Venezuela`;
+          const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`);
+          const d = await r.json();
+          if (d.length > 0) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) };
+        } catch {}
+        return null;
+      };
+
       const submit = async () => {
         if (!form.name.trim())    { toast('Ingresa el nombre del centro', 'error'); return; }
         if (!form.address.trim()) { toast('Ingresa la dirección', 'error'); return; }
@@ -1129,6 +1195,7 @@
         if (!form.needs.trim())   { toast('Indica qué se necesita', 'error'); return; }
         setSaving(true);
         try {
+          const coords = await geocode(form.address, form.zone);
           await db.collection('acopios').add({
             name:        form.name.trim(),
             address:     form.address.trim(),
@@ -1137,6 +1204,8 @@
             contactName: form.contactName.trim(),
             contact:     form.contact.trim(),
             active:      true,
+            lat:         coords?.lat || null,
+            lng:         coords?.lng || null,
             createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
           });
           toast('Centro de acopio registrado ✅', 'success');
@@ -1169,6 +1238,17 @@
               {showForm ? '✕ Cancelar' : '+ Agregar'}
             </button>
           </div>
+
+          {/* Banner mapa interactivo */}
+          <a href="https://www.caracasayuda.com" target="_blank" rel="noopener"
+            className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 mb-4 hover:bg-blue-100 transition">
+            <span className="text-2xl">🗺</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-blue-800 text-sm">caracasayuda.com</p>
+              <p className="text-blue-600 text-xs mt-0.5 leading-snug">Mapa interactivo con agua, comida, refugios, hospitales, mascotas, combustible e internet. Actualizado por voluntarios.</p>
+            </div>
+            <span className="text-blue-400 flex-shrink-0">→</span>
+          </a>
 
           {/* Formulario */}
           {showForm && (
@@ -1215,7 +1295,21 @@
             </div>
           )}
 
-          {/* Lista */}
+          {/* Tabs Lista / Mapa */}
+          {!loading && centers.length > 0 && (
+            <div className="flex gap-2 mb-4">
+              {[['lista','📋 Lista'],['mapa','🗺 Mapa']].map(([v,l]) => (
+                <button key={v} onClick={() => setTab(v)}
+                  className={`px-5 py-2 rounded-full text-sm font-semibold transition-colors
+                    ${tab === v ? 'text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'}`}
+                  style={tab === v ? {background: 'linear-gradient(to right, #f59e0b, #ef4444)'} : {}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Contenido */}
           {loading ? (
             <div className="space-y-3">
               {[1,2].map(i => (
@@ -1233,6 +1327,8 @@
                 + Agregar centro
               </button>
             </div>
+          ) : tab === 'mapa' ? (
+            <MapaAcopio centers={centers} />
           ) : (
             <>
               <p className="text-xs text-gray-400 mb-3 font-medium">{centers.length} centro{centers.length !== 1 ? 's' : ''} activo{centers.length !== 1 ? 's' : ''}</p>

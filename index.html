@@ -727,8 +727,11 @@
 
     // ─── DETAIL VIEW ───────────────────────────────────────────────────────────
     function DetailView({ report: initial, onBack }) {
-      const [report, setReport]         = useState(initial);
+      const [report, setReport]           = useState(initial);
       const [showMarkFound, setShowFound] = useState(false);
+      const [cropSrc, setCropSrc]         = useState(null);
+      const [uploadingPhoto, setUploading] = useState(false);
+      const photoFileRef = useRef();
       const isFound  = report.status === 'encontrado';
       const isPerson = report.type === 'persona';
 
@@ -738,6 +741,33 @@
         );
         return unsub;
       }, [initial.id]);
+
+      const handlePhotoFile = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) { toast('La foto debe ser menor a 10 MB', 'error'); return; }
+        e.target.value = '';
+        setCropSrc(URL.createObjectURL(file));
+      };
+
+      const handleCropConfirm = async (blob) => {
+        setCropSrc(null);
+        setUploading(true);
+        try {
+          const fd = new FormData();
+          fd.append('file', blob, 'photo.jpg');
+          fd.append('upload_preset', CLOUDINARY_PRESET);
+          const res  = await fetch(CLOUDINARY_URL, { method: 'POST', body: fd });
+          const data = await res.json();
+          const url  = data.secure_url;
+          if (!url) throw new Error('sin URL');
+          await db.collection('reports').doc(report.id).update({ photoURL: url });
+          toast('Foto actualizada', 'success');
+        } catch {
+          toast('Error al subir la foto', 'error');
+        }
+        setUploading(false);
+      };
 
       const shareWhatsApp = () => {
         const emoji = isPerson ? '👤' : '🐾';
@@ -771,10 +801,22 @@
           </div>
 
           {/* Foto */}
-          {report.photoURL && (
-            <img src={report.photoURL} alt={report.name}
-              className="w-full h-64 object-cover rounded-2xl mb-4 shadow-sm" />
-          )}
+          <div className="relative mb-4">
+            {report.photoURL
+              ? <img src={report.photoURL} alt={report.name}
+                  className="w-full h-64 object-cover rounded-2xl shadow-sm" />
+              : <div className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
+                  Sin foto
+                </div>
+            }
+            <button
+              onClick={() => photoFileRef.current.click()}
+              disabled={uploadingPhoto}
+              className="absolute bottom-2 right-2 bg-gray-900/75 hover:bg-gray-900 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition active:scale-95 disabled:opacity-60">
+              {uploadingPhoto ? '⏳ Subiendo...' : '✏️ Cambiar foto'}
+            </button>
+            <input ref={photoFileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoFile} />
+          </div>
 
           {/* Info card */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4">
@@ -866,6 +908,14 @@
               report={report}
               onClose={() => setShowFound(false)}
               onSuccess={() => setShowFound(false)}
+            />
+          )}
+
+          {cropSrc && (
+            <CropModal
+              imageSrc={cropSrc}
+              onConfirm={handleCropConfirm}
+              onCancel={() => setCropSrc(null)}
             />
           )}
         </div>

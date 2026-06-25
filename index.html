@@ -15,6 +15,8 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; background: #f3f4f6; }
@@ -448,12 +450,67 @@
       );
     }
 
+    // ─── CROP MODAL ────────────────────────────────────────────────────────────
+    function CropModal({ imageSrc, onConfirm, onCancel }) {
+      const imgRef     = useRef();
+      const cropperRef = useRef();
+
+      useEffect(() => {
+        if (!imgRef.current) return;
+        cropperRef.current = new Cropper(imgRef.current, {
+          aspectRatio:   1,
+          viewMode:      1,
+          dragMode:      'move',
+          autoCropArea:  0.85,
+          responsive:    true,
+          checkOrientation: true,
+          movable:       true,
+          rotatable:     false,
+          scalable:      false,
+          zoomable:      true,
+          zoomOnTouch:   true,
+          zoomOnWheel:   true,
+        });
+        return () => { cropperRef.current?.destroy(); };
+      }, [imageSrc]);
+
+      const confirm = () => {
+        const canvas = cropperRef.current.getCroppedCanvas({
+          width: 900, height: 900, imageSmoothingQuality: 'high'
+        });
+        canvas.toBlob(blob => onConfirm(blob, URL.createObjectURL(blob)), 'image/jpeg', 0.88);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{background:'#111'}}>
+          <div className="flex items-center justify-between px-4 py-3 bg-gray-900 flex-shrink-0">
+            <button onClick={onCancel}
+              className="text-gray-300 font-semibold px-3 py-2 rounded-xl hover:bg-gray-700 transition">
+              Cancelar
+            </button>
+            <div className="text-center">
+              <p className="text-white font-bold text-sm">Encuadra la foto</p>
+              <p className="text-gray-400 text-xs">Arrastra · Pellizca para zoom</p>
+            </div>
+            <button onClick={confirm}
+              className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-2 rounded-xl transition active:scale-95">
+              ✓ Usar
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <img ref={imgRef} src={imageSrc} alt="crop" style={{display:'block', maxWidth:'100%'}} />
+          </div>
+        </div>
+      );
+    }
+
     // ─── NEW REPORT FORM ───────────────────────────────────────────────────────
     function NewReportView({ onBack, onSuccess }) {
       const [type, setType]       = useState('persona');
       const [saving, setSaving]   = useState(false);
       const [photo, setPhoto]     = useState(null);
       const [preview, setPreview] = useState(null);
+      const [cropSrc, setCropSrc] = useState(null);
       const [form, setForm]       = useState({
         name: '', age: '', animalType: 'Perro', breed: '',
         description: '', lastSeen: '', zone: '',
@@ -466,15 +523,21 @@
         const file = e.target.files[0];
         if (!file) return;
         if (file.size > 10 * 1024 * 1024) { toast('La foto debe ser menor a 10 MB', 'error'); return; }
-        setPhoto(file);
-        setPreview(URL.createObjectURL(file));
+        e.target.value = '';
+        setCropSrc(URL.createObjectURL(file));
+      };
+
+      const handleCropConfirm = (blob, previewURL) => {
+        setPhoto(blob);
+        setPreview(previewURL);
+        setCropSrc(null);
       };
 
       const uploadPhoto = async () => {
         if (!photo) return null;
         try {
           const fd = new FormData();
-          fd.append('file', photo);
+          fd.append('file', photo, 'photo.jpg');
           fd.append('upload_preset', CLOUDINARY_PRESET);
           const res  = await fetch(CLOUDINARY_URL, { method: 'POST', body: fd });
           const data = await res.json();
@@ -522,6 +585,7 @@
       const card = "bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-col gap-4";
 
       return (
+        <>
         <div className="max-w-2xl mx-auto px-4 pb-12">
           {/* Page header */}
           <div className="flex items-center gap-3 py-5">
@@ -649,6 +713,15 @@
             {saving ? '⏳ Publicando reporte...' : '🆘 Publicar Reporte'}
           </button>
         </div>
+
+        {cropSrc && (
+          <CropModal
+            imageSrc={cropSrc}
+            onConfirm={handleCropConfirm}
+            onCancel={() => setCropSrc(null)}
+          />
+        )}
+        </>
       );
     }
 

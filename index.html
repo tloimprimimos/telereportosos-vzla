@@ -101,7 +101,7 @@
     };
 
     // ─── SIDEBAR ───────────────────────────────────────────────────────────────
-    function Sidebar({ view, onGoFeed, onGoNew, isOpen, onClose, counts }) {
+    function Sidebar({ view, onGoFeed, onGoNew, onGoAcopio, isOpen, onClose, counts }) {
       return (
         <>
           {/* Overlay mobile */}
@@ -147,6 +147,13 @@
                   ${view === 'new' ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
               >
                 <span>➕</span> Nuevo Reporte
+              </button>
+              <button
+                onClick={() => { onGoAcopio(); onClose(); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-colors mt-1
+                  ${view === 'acopio' ? 'bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50'}`}
+              >
+                <span>📦</span> Centros de Acopio
               </button>
             </nav>
 
@@ -1029,6 +1036,215 @@
       );
     }
 
+    // ─── ACOPIO CARD ───────────────────────────────────────────────────────────
+    function AcopioCard({ center, onClose }) {
+      const items = center.needs.split(',').map(s => s.trim()).filter(Boolean);
+
+      const share = () => {
+        const text = [
+          '📦 *CENTRO DE ACOPIO — Venezuela Sismo 2026*',
+          `🏢 *${center.name}*`,
+          `📍 ${center.address}${center.zone ? ` — ${center.zone}` : ''}`,
+          `🙏 *Se necesita:* ${center.needs}`,
+          center.contact ? `📞 ${center.contactName ? center.contactName + ' — ' : ''}${center.contact}` : null,
+          '',
+          `🔗 ${SITE_URL}`,
+        ].filter(Boolean).join('\n');
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+      };
+
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="h-1" style={{background: 'linear-gradient(to right, #f59e0b, #ef4444)'}} />
+          <div className="p-4">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <h3 className="font-bold text-gray-900 text-[15px] leading-tight">{center.name}</h3>
+              <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 uppercase tracking-wide">
+                ✓ Activo
+              </span>
+            </div>
+            <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-3">
+              <span>📍</span> {center.address}{center.zone ? ` — ${center.zone}` : ''}
+            </p>
+
+            <div className="mb-3">
+              <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1.5">🙏 Se necesita:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {items.map((item, i) => (
+                  <span key={i} className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold px-2.5 py-1 rounded-full">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {center.contact && (
+              <p className="text-sm text-gray-600 flex items-center gap-1.5 mb-3">
+                <span>📞</span>
+                {center.contactName ? `${center.contactName} — ` : ''}
+                <a href={`tel:${center.contact}`} className="text-blue-600 font-mono font-semibold">{center.contact}</a>
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-3 border-t border-gray-50">
+              <button onClick={share}
+                className="flex-1 bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-colors">
+                📲 Compartir
+              </button>
+              <button onClick={onClose}
+                className="px-4 bg-gray-100 hover:bg-red-50 hover:text-red-500 text-gray-500 text-sm font-semibold py-2 rounded-xl active:scale-95 transition-colors">
+                Cerrar
+              </button>
+            </div>
+            <p className="text-xs text-gray-300 mt-2 text-right">{timeAgo(center.createdAt)}</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── ACOPIO VIEW ───────────────────────────────────────────────────────────
+    function AcopioView() {
+      const [centers, setCenters] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [showForm, setShowForm] = useState(false);
+      const [saving, setSaving]   = useState(false);
+      const [form, setForm]       = useState({ name:'', address:'', zone:'', needs:'', contactName:'', contact:'' });
+      const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+      useEffect(() => {
+        const unsub = db.collection('acopios')
+          .where('active', '==', true)
+          .orderBy('createdAt', 'desc')
+          .onSnapshot(
+            snap => { setCenters(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+            ()   => setLoading(false)
+          );
+        return unsub;
+      }, []);
+
+      const submit = async () => {
+        if (!form.name.trim())    { toast('Ingresa el nombre del centro', 'error'); return; }
+        if (!form.address.trim()) { toast('Ingresa la dirección', 'error'); return; }
+        if (!form.zone)           { toast('Selecciona la zona', 'error'); return; }
+        if (!form.needs.trim())   { toast('Indica qué se necesita', 'error'); return; }
+        setSaving(true);
+        try {
+          await db.collection('acopios').add({
+            name:        form.name.trim(),
+            address:     form.address.trim(),
+            zone:        form.zone,
+            needs:       form.needs.trim(),
+            contactName: form.contactName.trim(),
+            contact:     form.contact.trim(),
+            active:      true,
+            createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+          });
+          toast('Centro de acopio registrado ✅', 'success');
+          setForm({ name:'', address:'', zone:'', needs:'', contactName:'', contact:'' });
+          setShowForm(false);
+        } catch { toast('Error al guardar. Intenta de nuevo.', 'error'); }
+        setSaving(false);
+      };
+
+      const closeCenter = async (id) => {
+        await db.collection('acopios').doc(id).update({ active: false });
+        toast('Centro marcado como cerrado', 'info');
+      };
+
+      const inp = "w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white transition";
+      const lbl = "block text-sm font-semibold text-gray-700 mb-1.5";
+
+      return (
+        <div className="max-w-2xl mx-auto px-4 pb-12">
+          {/* Header */}
+          <div className="flex items-center justify-between py-5">
+            <div>
+              <h2 className="font-bold text-lg text-gray-900 leading-tight">📦 Centros de Acopio</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Puntos de donación activos · Sismo Junio 2026</p>
+            </div>
+            <button
+              onClick={() => setShowForm(v => !v)}
+              className="text-white font-bold px-4 py-2 rounded-xl text-sm shadow active:scale-95 transition"
+              style={{background: showForm ? '#6b7280' : VZ_GRAD}}>
+              {showForm ? '✕ Cancelar' : '+ Agregar'}
+            </button>
+          </div>
+
+          {/* Formulario */}
+          {showForm && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-5 flex flex-col gap-4">
+              <div>
+                <label className={lbl}>Nombre del centro *</label>
+                <input className={inp} placeholder="Ej: Iglesia San Juan, Escuela Simón Bolívar, Casa comunal"
+                  value={form.name} onChange={e => set('name', e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Dirección exacta *</label>
+                <input className={inp} placeholder="Ej: Av. Principal de Los Palos Grandes, frente al parque"
+                  value={form.address} onChange={e => set('address', e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Zona / Estado *</label>
+                <select className={inp} value={form.zone} onChange={e => set('zone', e.target.value)}>
+                  <option value="">Selecciona la zona...</option>
+                  {ZONES.map(z => <option key={z}>{z}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={lbl}>¿Qué se necesita? *</label>
+                <textarea className={`${inp} resize-none`} rows={3}
+                  placeholder="Ej: Agua potable, alimentos enlatados, ropa, medicamentos, pañales, colchonetas, linternas..."
+                  value={form.needs} onChange={e => set('needs', e.target.value)} />
+                <p className="text-xs text-gray-400 mt-1">Separa los artículos con comas para mostrarlos como etiquetas</p>
+              </div>
+              <div>
+                <label className={lbl}>Tu nombre (quien reporta)</label>
+                <input className={inp} placeholder="Opcional"
+                  value={form.contactName} onChange={e => set('contactName', e.target.value)} />
+              </div>
+              <div>
+                <label className={lbl}>Teléfono / WhatsApp de contacto</label>
+                <input className={inp} type="tel" placeholder="+58 412 000 0000 (opcional)"
+                  value={form.contact} onChange={e => set('contact', e.target.value)} />
+              </div>
+              <button onClick={submit} disabled={saving}
+                className="w-full text-white font-bold py-3.5 rounded-xl transition active:scale-95 shadow disabled:opacity-60"
+                style={{background: saving ? '#9ca3af' : 'linear-gradient(to right, #f59e0b, #ef4444)'}}>
+                {saving ? '⏳ Guardando...' : '📦 Registrar Centro de Acopio'}
+              </button>
+            </div>
+          )}
+
+          {/* Lista */}
+          {loading ? (
+            <div className="space-y-3">
+              {[1,2].map(i => (
+                <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 animate-pulse h-40" />
+              ))}
+            </div>
+          ) : centers.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 text-gray-400 shadow-sm">
+              <div className="text-5xl mb-3">📦</div>
+              <p className="font-semibold text-gray-600 text-base">No hay centros registrados aún</p>
+              <p className="text-sm mt-1">Sé el primero en agregar un punto de acopio</p>
+              <button onClick={() => setShowForm(true)}
+                className="mt-5 text-white font-bold px-6 py-2.5 rounded-xl text-sm shadow"
+                style={{background: VZ_GRAD}}>
+                + Agregar centro
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-gray-400 mb-3 font-medium">{centers.length} centro{centers.length !== 1 ? 's' : ''} activo{centers.length !== 1 ? 's' : ''}</p>
+              <div className="flex flex-col gap-3">
+                {centers.map(c => <AcopioCard key={c.id} center={c} onClose={() => closeCenter(c.id)} />)}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
     // ─── APP ───────────────────────────────────────────────────────────────────
     function App() {
       const [view, setView]             = useState('feed');
@@ -1051,6 +1267,7 @@
 
       const goFeed    = () => { setReport(null); setView('feed'); };
       const goNew     = () => setView('new');
+      const goAcopio  = () => setView('acopio');
       const goDetail  = (r) => { setReport(r); setView('detail'); };
       const onSuccess = (data) => { setSuccess(data); setView('feed'); };
 
@@ -1062,6 +1279,7 @@
             view={view}
             onGoFeed={goFeed}
             onGoNew={goNew}
+            onGoAcopio={goAcopio}
             isOpen={sidebarOpen}
             onClose={() => setSidebar(false)}
             counts={counts}
@@ -1077,6 +1295,7 @@
             <main>
               {view === 'feed'   && <FeedView onSelect={goDetail} onNew={goNew} />}
               {view === 'new'    && <NewReportView onBack={goFeed} onSuccess={onSuccess} />}
+              {view === 'acopio' && <AcopioView />}
               {view === 'detail' && selectedReport &&
                 <DetailView report={selectedReport} onBack={goFeed} />}
             </main>

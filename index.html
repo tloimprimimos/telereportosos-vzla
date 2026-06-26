@@ -1185,10 +1185,15 @@
 
       useEffect(() => {
         const unsub = db.collection('acopios')
-          .where('active', '==', true)
-          .orderBy('createdAt', 'desc')
           .onSnapshot(
-            snap => { setCenters(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+            snap => {
+              const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              const active = all
+                .filter(c => c.active !== false)
+                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+              setCenters(active);
+              setLoading(false);
+            },
             ()   => setLoading(false)
           );
         return unsub;
@@ -1442,10 +1447,15 @@
 
       useEffect(() => {
         const unsub = db.collection('refugios')
-          .where('active', '==', true)
-          .orderBy('createdAt', 'desc')
           .onSnapshot(
-            snap => { setRefugios(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+            snap => {
+              const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              const active = all
+                .filter(r => r.active !== false)
+                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+              setRefugios(active);
+              setLoading(false);
+            },
             ()   => setLoading(false)
           );
         return unsub;
